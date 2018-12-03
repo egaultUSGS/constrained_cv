@@ -1,16 +1,27 @@
+#probably need to update these imports to the new name, PyHAT
 import PySAT.libpysat.spectral.spectral_data as spectral_data
 import PySAT.libpysat.regression.cv as cv
-import PySAT.libpysat.plotting.plots as plots
 import pandas as pd
 import numpy as np
 
 
 best_settings = []
 models = []
+
+#specify the list of elements that we want to develop models for
 elements = ['Na2O','K2O']
+
+#set output path
 outpath = r"C:\Users\rbanderson\Documents\Projects\MSL\ChemCam\Database\Alkalis\full_db_mars_corrected_dopedTiO2_highAlk1 - 1\Feb2018\\"
+
+#set source data path
+sourcepath = outpath
+
+# set the composition ranges to consider. This allows cross validation to test out all of the different submodels
+# that will be used in the eventual calibration
 yranges = [[0,100], [0,1.5], [1,6], [5,100]]
 
+#set the list of methods to try
 methods = [
             'PLS',
             'Elastic Net',
@@ -22,8 +33,13 @@ methods = [
             'LARS',
             'OMP'
             ]
+#create a log-spaced set of alpha values to consider - this is used by a number of different methods
 alphas = np.logspace(np.log10(0.000000001), np.log10(0.001),
                                          num=20)
+
+# set the parameters to consider for each method. Each parameter is in a list, so more than one value can be specified.
+# The cross validation will evaluate every possible permutation of parameters, so beware of adding too many,
+# especially for slower methods
 
 params = {'PLS':{'n_components': [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20],
                               'scale': [False]},
@@ -90,28 +106,35 @@ params = {'PLS':{'n_components': [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,1
                     'random_state': [None]}
             }
 
+#Step through each of the elements listed
 for element in elements:
-    filenames = [r"C:\Users\rbanderson\Documents\Projects\MSL\ChemCam\Database\Alkalis\full_db_mars_corrected_dopedTiO2_highAlk1 - 1\Feb2018\data1_"+element+"_train.csv",
-    r"C:\Users\rbanderson\Documents\Projects\MSL\ChemCam\Database\Alkalis\full_db_mars_corrected_dopedTiO2_highAlk1 - 1\Feb2018\data3_"+element+"_train.csv"]
-    for file in filenames:
+    #get the data normalized to 3 (each spectrometer separately) or to 1 (sum of all spectrometers)
+    filenames = [sourcepath+"data1_"+element+"_train.csv",sourcepath+"data3_"+element+"_train.csv"]
 
+    #Step through each data file
+    for file in filenames:
+        # Read the data in, make it a "spectral_data" object
         data = spectral_data.spectral_data(pd.read_csv(file, header=[0, 1], verbose=True))
 
+        #Step through each regression method
         for method in methods:
-            paramstemp = params[method]
-            cv_obj = cv.cv(paramstemp)
+            paramstemp = params[method] #get the parameters for this method
+            cv_obj = cv.cv(paramstemp) #set up cross validation across all permutations of parameters
 
+            #do the cross validation for each composition range
             for yrange in yranges:
+                #set up an output file name that specifies the current composition range being considered
                 if file == filenames[0]:
                     outfile_root = 'data1_' + element + '_' + str(yrange[0])+'-'+str(yrange[1])+'_'
                 if file == filenames[1]:
                     outfile_root = 'data3_' + element + '_' + str(yrange[0])+'-'+str(yrange[1])+'_'
 
-                #apply yrange
+                #apply yrange to filter the compositions used in the regression
                 y = np.array(data.df[('comp',element)])
                 match = np.squeeze((y > yrange[0]) & (y < yrange[1]))
                 datatemp = spectral_data.spectral_data(data.df.ix[match])
 
+                #do the actual cross validation for the current method, element, and yrange
                 datatemp.df, cv_results, cvmodels, cvmodelkeys = cv_obj.do_cv(datatemp.df, xcols='wvl',
                                                                               ycol=('comp', element),
                                                                               yrange=yrange, method=method)
